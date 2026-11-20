@@ -1,0 +1,92 @@
+import React, { useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import logo from "../../assets/logo.svg";
+import PhoneLocationPrompt from "../../components/PhoneLocationPrompt.jsx";
+import "../../styles/Purpose.css";
+
+function CashierPurpose() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const office = location.state?.office || "cashier";
+
+  const [name, setName] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [clientType, setClientType] = useState("student");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!name || !purpose || (clientType === "student" && !studentId.trim())) {
+      alert("Please fill in all fields.");
+      return;
+    }
+    navigate("/Getticket", { state: { name, studentId, purpose, office, clientType } });
+  };
+
+  return (
+    <div className="purpose-container">
+      <div className="purpose-content purpose-form-content">
+        <button
+          type="button"
+          className="purpose-back-button"
+          onClick={() => navigate("/kiosk")}
+        >
+          Back to offices
+        </button>
+        <img src={logo} alt="Linya Logo" />
+        <h3>Cashier</h3>
+        <PhoneLocationPrompt />
+
+        <form onSubmit={handleSubmit}>
+          <fieldset className="client-type-picker">
+            <legend>Client type</legend>
+            <label><input type="radio" name="clientType" value="student" checked={clientType === "student"} onChange={() => setClientType("student")} /> Student</label>
+            <label><input type="radio" name="clientType" value="visitor" checked={clientType === "visitor"} onChange={() => setClientType("visitor")} /> Visitor</label>
+          </fieldset>
+
+          <div>
+            <label>Name:</label>
+            <input
+              type="text"
+              placeholder="Enter name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+
+          {clientType === "student" && <div>
+            <label>Student ID:</label>
+            <input
+              type="text"
+              placeholder="Enter Student ID"
+              value={studentId}
+              onChange={(e) => setStudentId(e.target.value)}
+              required
+            />
+          </div>}
+
+          <div>
+            <label>Purpose:</label>
+            <select
+              value={purpose}
+              onChange={(e) => setPurpose(e.target.value)}
+              required
+            >
+              <option value="">Select Transact</option>
+              <option value="Payment of Tuition">Payment of Tuition</option>
+              <option value="Payment of Enrollment">Payment of Enrollment</option>
+              <option value="Payment of Laboratory Fees">Payment of Laboratory Fees</option>
+              <option value="Payment of Document Fees">Payment of Document Fees</option>
+              <option value="Request for Refund">Request for Refund</option>
+            </select>
+          </div>
+
+          <button type="submit">Submit</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export default CashierPurpose;

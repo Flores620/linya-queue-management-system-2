@@ -1,0 +1,197 @@
+.selectoffice-container {
+  background-color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: clamp(16px, 3vw, 32px);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  min-height: 100vh;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.selectoffice-title {
+  font-size: 3.5rem; 
+  color: rgb(12, 12, 12);
+  font-weight: bold;
+  margin-bottom: 60px;
+  text-align: center;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0);
+}
+
+.office-cards-container {
+  display: flex;
+  gap: clamp(16px, 3vw, 50px);
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: clamp(20px, 4vh, 60px);
+  max-width: 1200px; 
+}
+
+.office-card {
+  background: white;
+  border: 4px solid #406499 ;
+  border-radius: 20px; 
+  padding: 50px; 
+  width: clamp(240px, 25vw, 320px);
+  height: clamp(260px, 38vh, 350px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.office-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.office-card.selected {
+  border-color: #40a5f8;
+  border-width: 4px;
+  box-shadow: 0 0 20px rgba(4, 56, 105, 0.4);
+  background: linear-gradient(135deg, #406499 0%, #ffffff 100%);
+}
+
+.office-icon {
+  font-size: 5rem; /* Dako ang icon */
+  margin-bottom: 25px;
+}
+
+.office-name {
+  font-size: 2rem; /* Dako ang name */
+  font-weight: bold;
+  color: #000000;
+  margin-bottom: 18px;
+}
+
+.office-description {
+  font-size: 1.05rem; /* Dako ang description */
+  color: #666666;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.btn-proceed {
+  background: rgb(0, 25, 96);
+  color: white;
+  border: none;
+  padding: 18px 70px; /* Dako pud ang button */
+  font-size: 1.2rem; /* Dako ang font */
+  font-weight: bold;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  
+}
+
+.btn-proceed:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+.btn-proceed:active {
+  transform: scale(0.98);
+}
+
+@media (max-width: 768px) {
+  .selectoffice-container {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    justify-content: flex-start;
+    overflow-y: auto;
+    padding: max(16px, env(safe-area-inset-top)) 18px max(20px, env(safe-area-inset-bottom));
+  }
+
+  .selectoffice-title {
+    font-size: clamp(1.8rem, 7vw, 2.25rem);
+    margin: 8px 0 24px;
+  }
+
+  .office-cards-container {
+    width: 100%;
+    gap: 12px;
+    margin: 0 0 20px;
+  }
+
+  .office-card {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    column-gap: 14px;
+    row-gap: 4px;
+    width: 100%;
+    height: auto;
+    min-height: 96px;
+    padding: 16px;
+    border-width: 2px;
+    border-radius: 16px;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .office-icon {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    align-self: center;
+    font-size: 2.25rem;
+    margin: 0;
+  }
+
+  .office-name {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+    font-size: 1.15rem;
+    margin: 0;
+  }
+
+  .office-description {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+    font-size: 0.88rem;
+    line-height: 1.4;
+  }
+
+  .btn-proceed {
+    width: 100%;
+    min-height: 52px;
+    padding: 12px 20px;
+    border-radius: 14px;
+  }
+
+  .office-card:hover,
+  .btn-proceed:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .selectoffice-container {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .office-card {
+    grid-template-columns: 40px minmax(0, 1fr);
+    column-gap: 10px;
+    padding: 14px;
+  }
+
+  .office-description {
+    font-size: 0.82rem;
+  }
+}

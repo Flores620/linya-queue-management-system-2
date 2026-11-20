@@ -1,0 +1,205 @@
+.ticket-screen-container {
+  min-height: 100vh;
+  background: #f4f4f4;
+}
+
+.ticket-tabs {
+  display: flex;
+  background: #fff;
+  border-bottom: 2px solid #000;
+  position: sticky;
+  top: 60px; /* Below Navbar */
+  z-index: 100;
+}
+
+.ticket-tabs button {
+  flex: 1;
+  padding: 15px 5px;
+  border: none;
+  background: none;
+  font-weight: bold;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-right: 1px solid #ddd;
+}
+
+.ticket-tabs button.active {
+  background: #000;
+  color: #fff;
+}
+
+.tab-content {
+  padding: 20px;
+  text-align: center;
+}
+
+.mini-item {
+  display: flex;
+  justify-content: space-between;
+  background: white;
+  padding: 15px;
+  border: 2px solid #000;
+  margin-bottom: 10px;
+}
+
+.mini-item .num { font-size: 1.5rem; font-weight: 800; }
+
+.content-fade-in {
+  animation: fadeIn 0.3s ease-in;
+}
+
+.call-notification-banner {
+  background: #ffcc00;
+  color: #000;
+  text-align: center;
+  padding: 10px;
+  font-weight: bold;
+  animation: blinker 1.5s linear infinite;
+}
+
+@keyframes blinker {
+  50% { opacity: 0.5; }
+}
+
+.status-tag.serving {
+  color: #28a745;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.nav-notification-bell {
+  font-size: 1.5rem;
+  padding: 0 10px;
+}
+
+/* The Handheld Body */
+.gameboy-shell {
+  background: #c3c3c3; /* Classic Gray */
+  width: 90%;
+  max-width: 340px;
+  margin: 20px auto;
+  padding: 20px 20px 40px 20px;
+  border-radius: 10px 10px 60px 10px; /* Iconic bottom-right curve */
+  border: 4px solid #999;
+  box-shadow: 10px 10px 0px rgba(0,0,0,0.1);
+}
+
+/* The Screen Area */
+.lcd-screen {
+  background: #9bbc0f; /* Original GB Green */
+  border: 5px solid #555;
+  border-radius: 5px;
+  position: relative;
+  overflow: hidden;
+}
+
+.score-text {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 14px;
+  font-weight: bold;
+  padding: 5px;
+  color: #0f380f;
+  border-bottom: 1px solid #0f380f;
+}
+
+canvas {
+  display: block;
+  width: 100%; /* Responsive to shell width */
+  height: auto;
+  image-rendering: pixelated; /* Keeps it retro and sharp */
+}
+
+/* Mobile Controls Section */
+.gb-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 30px;
+}
+
+/* Directional Pad (D-PAD) */
+.d-pad {
+  display: grid;
+  grid-template-columns: 50px 50px 50px;
+  grid-template-rows: 50px 50px 50px;
+}
+
+.d-pad button {
+  background: #333;
+  color: #fff;
+  border: none;
+  font-size: 1.5rem;
+  box-shadow: 0 4px #000;
+  touch-action: manipulation; /* Prevents zooming on double tap */
+}
+
+/* Positioning Buttons */
+.btn-left { grid-column: 1; grid-row: 2; border-radius: 5px 0 0 5px; }
+.btn-right { grid-column: 3; grid-row: 2; border-radius: 0 5px 5px 0; }
+
+.d-pad button:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px #000;
+  background: #444;
+}
+
+/* Action Button (A) */
+.a-btn-container {
+  text-align: center;
+}
+
+.a-btn {
+  width: 70px;
+  height: 70px;
+  background: #a01010; /* Dark Red */
+  border-radius: 50%;
+  border: none;
+  color: #fff;
+  font-size: 1.8rem;
+  font-weight: bold;
+  box-shadow: 0 5px #600;
+  touch-action: manipulation;
+}
+
+.a-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px #600;
+}
+
+.a-btn-container small {
+  display: block;
+  margin-top: 8px;
+  font-weight: bold;
+  color: #555;
+  font-size: 0.7rem;
+}
+
+/* Overlays */
+.over-msg, .game-alert {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #0f380f;
+  color: #9bbc0f;
+  padding: 15px;
+  text-align: center;
+  width: 80%;
+}
+
+/* Notification Pop-up over the game */
+.game-interruption {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255, 204, 0, 0.95);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}

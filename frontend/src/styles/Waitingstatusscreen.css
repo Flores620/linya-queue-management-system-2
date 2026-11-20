@@ -1,0 +1,75 @@
+  .waiting-status-container {
+  max-width: 600px;
+  margin: 20px auto;
+  padding: 15px;
+  background-color: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  min-height: calc(100vh - 100px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.header h2 {
+  color: #007bff;
+  margin-bottom: 10px;
+}
+
+.status-card, .queue-info-card {
+  margin-bottom: 20px;
+  flex: 1;
+}
+
+.card-row {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.waiting-time {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.time-display {
+  font-size: 2em;
+  font-weight: bold;
+  color: #28a745;
+}
+
+.time-value {
+  display: inline-block;
+  padding: 10px 20px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+}
+
+.info-message {
+  margin-bottom: 20px;
+}
+
+.refresh-section {
+  text-align: center;
+}
+
+.refresh-section .btn {
+  padding: 10px 30px;
+  font-size: 1.1em;
+  background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  color: white;
+  border-radius: 25px;
+  box-shadow: 0 4px 15px 0 rgba(116, 79, 168, 0.75);
+  transition: all 0.3s ease;
+}
+
+.refresh-section .btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px 0 rgba(116, 79, 168, 0.9);
+}

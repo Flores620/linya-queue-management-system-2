@@ -1,0 +1,13 @@
+# Dependency folders (Massive files that npm handles)
+node_modules/
+dist/
+build/
+
+# Secret credentials and environment keys (CRITICAL SECURITY)
+firebase-key.json
+.env
+.env.local
+
+# Operating system trash files
+.DS_Store
+Thumbs.db
