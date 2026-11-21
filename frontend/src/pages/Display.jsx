@@ -43,13 +43,19 @@ function Display() {
           String(b.queuedAt || b.timestamp)
         );
       });
+    const servingCount = active.filter((ticket) => ticket.status === 'Serving').length;
+    const waitingCount = active.length - servingCount;
 
     return (
       <section key={office.id} className={`display-side-column ${office.className}`}>
         <header className="display-column-header">
           <div>
             <h2>{office.label}</h2>
-            <span>{active.length} in queue</span>
+            <div className="display-queue-counts" aria-label="Queue status counts">
+              <span>{active.length} in Queue</span>
+              <span>{servingCount} Serving</span>
+              <span>{waitingCount} Waiting</span>
+            </div>
           </div>
           {pauseStates[office.id] && <strong className="display-paused">PAUSED</strong>}
         </header>
@@ -94,7 +100,6 @@ function Display() {
           <h3>How to get a ticket</h3>
           <div className="steps-container">
             {[
-              "Select 'Get Ticket'",
               'Choose your office',
               'Enter student or visitor information',
               'Keep your ticket and wait',

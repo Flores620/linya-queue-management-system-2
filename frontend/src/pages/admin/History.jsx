@@ -12,7 +12,7 @@ const dayKeyOf = (d) => `${monthKeyOf(d)}-${pad(d.getDate())}`;
 const computeStats = (tickets) => {
   const total = tickets.length;
   const served = tickets.filter((t) => t.status === 'Served').length;
-  const unclaimed = total - served;
+  const unclaimed = tickets.filter((t) => t.status === 'Expired').length;
   const transferred = tickets.filter((t) => t.isTransferred).length;
   const rate = total ? Math.round((served / total) * 100) : 0;
 
@@ -25,41 +25,63 @@ const computeStats = (tickets) => {
   return { total, served, unclaimed, transferred, rate, topPurpose: top ? top[0] : '—', topCount: top ? top[1] : 0 };
 };
 
+const OFFICE_LABELS = {
+  registrar: 'Registrar',
+  cashier: 'Cashier',
+  principal: "Principal's Office",
+};
+
 const History = ({ officeType }) => {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
   const [search, setSearch] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [reportPeriod, setReportPeriod] = useState('daily');
+  const [reportValue, setReportValue] = useState(dayKeyOf(new Date()));
+  const [isExporting, setIsExporting] = useState(false);
+  const [reportFeedback, setReportFeedback] = useState('');
+  const [reportError, setReportError] = useState(false);
   const [expandedMonths, setExpandedMonths] = useState({});
   const [expandedDays, setExpandedDays] = useState({});
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    const fetchHistory = () => {
-      fetch(`${LOCAL_SERVER_URL}/api/tickets/history/${officeType}`)
-        .then((res) => res.json())
-        .then((data) => {
-          setTickets(Array.isArray(data) ? data : []);
-          setLoading(false);
-        })
-        .catch((err) => {
-          console.error('Failed to load history:', err);
-          setLoading(false);
-        });
+    let active = true;
+    const fetchHistory = async () => {
+      setLoading(true);
+      setLoadError('');
+      try {
+        const response = await fetch(`${LOCAL_SERVER_URL}/api/tickets/history/${officeType}`);
+        if (!response.ok) throw new Error(`History request failed (${response.status}).`);
+        const data = await response.json();
+        if (!Array.isArray(data)) throw new Error('The history response was not in the expected format.');
+        if (active) setTickets(data);
+      } catch (err) {
+        console.error('Failed to load history:', err);
+        if (active) setLoadError('History could not be loaded. Check the connection and try again.');
+      } finally {
+        if (active) setLoading(false);
+      }
     };
 
     fetchHistory();
     const socket = io(LOCAL_SERVER_URL, { transports: ['polling', 'websocket'] });
     socket.on('ticketsUpdated', fetchHistory);
-    return () => socket.disconnect();
-  }, [officeType]);
+    return () => {
+      active = false;
+      socket.disconnect();
+    };
+  }, [officeType, reloadKey]);
 
   // Group: month -> day, newest first, using real date keys
   const months = useMemo(() => {
     const monthMap = {};
     tickets.forEach((t) => {
-      const d = new Date(t.timestamp);
-      if (isNaN(d)) return;
+      const d = new Date(t.completedAt || t.timestamp);
+      if (Number.isNaN(d.getTime())) return;
       const mk = monthKeyOf(d);
       const dk = dayKeyOf(d);
       if (!monthMap[mk]) {
@@ -111,6 +133,10 @@ const History = ({ officeType }) => {
   const matchesFilters = (t) => {
     if (statusFilter === 'served' && t.status !== 'Served') return false;
     if (statusFilter === 'unclaimed' && t.status !== 'Expired') return false;
+    if (dateFilter) {
+      const completedDate = new Date(t.completedAt || t.timestamp);
+      if (Number.isNaN(completedDate.getTime()) || dayKeyOf(completedDate) !== dateFilter) return false;
+    }
     if (!search.trim()) return true;
     const term = search.toLowerCase();
     return (
@@ -123,20 +149,120 @@ const History = ({ officeType }) => {
 
   const toggleMonth = (key) => setExpandedMonths((p) => ({ ...p, [key]: !p[key] }));
   const toggleDay = (key) => setExpandedDays((p) => ({ ...p, [key]: !p[key] }));
-  const isFiltering = search.trim() !== '' || statusFilter !== 'all';
-  const downloadCsv = () => {
-    window.location.assign(`${LOCAL_SERVER_URL}/api/tickets/history/${officeType}/export`);
+  const isFiltering = search.trim() !== '' || dateFilter !== '' || statusFilter !== 'all';
+  const hasFilterMatches = months.some((month) =>
+    month.dayList.some((day) => day.tickets.some(matchesFilters))
+  );
+  const officeLabel = OFFICE_LABELS[officeType] || 'Office';
+
+  const updateReportPeriod = (period) => {
+    const now = new Date();
+    setReportPeriod(period);
+    setReportValue(
+      period === 'daily'
+        ? dayKeyOf(now)
+        : period === 'monthly'
+          ? monthKeyOf(now)
+          : period === 'yearly'
+            ? String(now.getFullYear())
+            : ''
+    );
+    setReportFeedback('');
+  };
+
+  const downloadReport = async (event) => {
+    event.preventDefault();
+    setIsExporting(true);
+    setReportFeedback('');
+    setReportError(false);
+
+    try {
+      const query = new URLSearchParams({ period: reportPeriod });
+      if (reportPeriod !== 'all') query.set('value', reportValue);
+      const response = await fetch(
+        `${LOCAL_SERVER_URL}/api/tickets/history/${officeType}/export?${query.toString()}`
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody.error || `Report download failed (${response.status}).`);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const filename = disposition.match(/filename="([^"]+)"/i)?.[1]
+        || `${officeType}-${reportPeriod}-${reportValue || 'history'}.csv`;
+      const objectUrl = URL.createObjectURL(blob);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = objectUrl;
+      downloadLink.download = filename;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      downloadLink.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setReportFeedback(`${filename} is ready.`);
+    } catch (error) {
+      setReportError(true);
+      setReportFeedback(error.message || 'The report could not be downloaded.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
     <div className="hx-container">
       <header className="hx-header">
         <div>
-          <h2 className="hx-title">Service History</h2>
-          <p className="hx-subtitle">Archive of completed and unclaimed tickets, organized by date</p>
+          <p className="hx-eyebrow">REPORTING · {officeLabel.toUpperCase()}</p>
+          <h1 className="hx-title">Service history</h1>
+          <p className="hx-subtitle">Completed and unclaimed tickets, grouped by completion date</p>
         </div>
-        <button type="button" className="hx-export" onClick={downloadCsv}>Download CSV Report</button>
       </header>
+
+      <section className="hx-report-builder" aria-labelledby="hx-report-title">
+        <div className="hx-report-intro">
+          <span className="hx-report-icon" aria-hidden="true">
+            <i className="bi bi-file-earmark-spreadsheet" />
+          </span>
+          <div>
+            <h2 id="hx-report-title">Download a report</h2>
+            <p>Choose a reporting period to export this office's history as CSV.</p>
+          </div>
+        </div>
+        <form className="hx-report-form" onSubmit={downloadReport}>
+          <label className="hx-report-field">
+            <span>Report period</span>
+            <select value={reportPeriod} onChange={(e) => updateReportPeriod(e.target.value)}>
+              <option value="daily">Daily</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+              <option value="all">All history</option>
+            </select>
+          </label>
+          {reportPeriod !== 'all' && (
+            <label className="hx-report-field">
+              <span>{reportPeriod === 'daily' ? 'Report date' : reportPeriod === 'monthly' ? 'Report month' : 'Report year'}</span>
+              <input
+                type={reportPeriod === 'daily' ? 'date' : reportPeriod === 'monthly' ? 'month' : 'number'}
+                min={reportPeriod === 'yearly' ? '1' : undefined}
+                max={reportPeriod === 'yearly' ? '9999' : undefined}
+                value={reportValue}
+                onChange={(e) => setReportValue(e.target.value)}
+                required
+              />
+            </label>
+          )}
+          <button type="submit" className="hx-export" disabled={isExporting}>
+            <i className={`bi ${isExporting ? 'bi-arrow-repeat' : 'bi-download'}`} aria-hidden="true" />
+            {isExporting ? 'Preparing report...' : 'Download CSV'}
+          </button>
+        </form>
+        {reportFeedback && (
+          <p className={`hx-report-feedback${reportError ? ' error' : ''}`} role={reportError ? 'alert' : 'status'}>
+            {reportFeedback}
+          </p>
+        )}
+      </section>
 
       {/* ALL-TIME SUMMARY */}
       <div className="hx-summary">
@@ -164,23 +290,58 @@ const History = ({ officeType }) => {
           type="text"
           className="hx-search"
           placeholder="Search name, ticket #, student ID, or purpose..."
+          aria-label="Search history"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select className="hx-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <input
+          type="date"
+          className="hx-date"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value)}
+          aria-label="Filter by completion date"
+        />
+        <select
+          className="hx-filter"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="Filter by ticket status"
+        >
           <option value="all">All statuses</option>
           <option value="served">Served only</option>
           <option value="unclaimed">Unclaimed only</option>
         </select>
+        {isFiltering && (
+          <button
+            type="button"
+            className="hx-clear-filters"
+            onClick={() => {
+              setSearch('');
+              setDateFilter('');
+              setStatusFilter('all');
+            }}
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {loading && <div className="hx-empty">Loading history...</div>}
-      {!loading && months.length === 0 && (
-        <div className="hx-empty">No history yet. Completed tickets will appear here after each day.</div>
+      {loading && <div className="hx-empty" role="status">Loading service history...</div>}
+      {!loading && loadError && (
+        <div className="hx-empty hx-error" role="alert">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+        </div>
+      )}
+      {!loading && !loadError && months.length === 0 && (
+        <div className="hx-empty">No service history is available for this office yet.</div>
+      )}
+      {!loading && !loadError && isFiltering && !hasFilterMatches && (
+        <div className="hx-empty">No tickets match your search and status filters.</div>
       )}
 
       {/* MONTHS */}
-      {months.map((month) => {
+      {!loading && !loadError && months.map((month) => {
         const visibleDays = month.dayList
           .map((day) => ({ ...day, visible: day.tickets.filter(matchesFilters) }))
           .filter((day) => (isFiltering ? day.visible.length > 0 : true));
@@ -190,7 +351,13 @@ const History = ({ officeType }) => {
 
         return (
           <section key={month.key} className="hx-month">
-            <button className="hx-month-header" onClick={() => toggleMonth(month.key)}>
+            <button
+              type="button"
+              className="hx-month-header"
+              onClick={() => toggleMonth(month.key)}
+              aria-expanded={monthOpen}
+              aria-controls={`history-month-${month.key}`}
+            >
               <div className="hx-month-left">
                 <span className={`hx-chevron ${monthOpen ? 'open' : ''}`}>▶</span>
                 <h3>{month.label}</h3>
@@ -204,13 +371,19 @@ const History = ({ officeType }) => {
             </button>
 
             {monthOpen && (
-              <div className="hx-month-body">
+              <div className="hx-month-body" id={`history-month-${month.key}`}>
                 {visibleDays.map((day) => {
                   const dayOpen = isFiltering || expandedDays[day.key];
                   const s = day.stats;
                   return (
                     <div key={day.key} className="hx-day">
-                      <button className="hx-day-header" onClick={() => toggleDay(day.key)}>
+                      <button
+                        type="button"
+                        className="hx-day-header"
+                        onClick={() => toggleDay(day.key)}
+                        aria-expanded={dayOpen}
+                        aria-controls={`history-day-${day.key}`}
+                      >
                         <div className="hx-day-left">
                           <span className={`hx-chevron small ${dayOpen ? 'open' : ''}`}>▶</span>
                           <span className="hx-day-title">{day.label}</span>
@@ -219,7 +392,7 @@ const History = ({ officeType }) => {
                       </button>
 
                       {dayOpen && (
-                        <div className="hx-day-body">
+                        <div className="hx-day-body" id={`history-day-${day.key}`}>
                           {/* DAY STATS */}
                           <div className="hx-day-stats">
                             <div className="hx-stat">
@@ -260,7 +433,7 @@ const History = ({ officeType }) => {
                                   <th>Student ID</th>
                                   <th>Purpose</th>
                                   <th>Status</th>
-                                  <th>Time</th>
+                                  <th>Completed</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -275,10 +448,10 @@ const History = ({ officeType }) => {
                                     <td>{t.purpose}</td>
                                     <td>
                                       <span className={`hx-status ${t.status === 'Served' ? 'served' : 'unclaimed'}`}>
-                                        {t.status === 'Served' ? 'Served' : 'Unclaimed'}
+                                        {t.status === 'Expired' ? 'Unclaimed' : t.status}
                                       </span>
                                     </td>
-                                    <td>{new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                                    <td>{new Date(t.completedAt || t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
                                   </tr>
                                 ))}
                               </tbody>

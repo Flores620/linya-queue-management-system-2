@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from '../../context/AuthContext.jsx';
 import '../../styles/Dashboard.css';
@@ -24,6 +24,11 @@ const Adminmanagement = ({ officeType }) => {
   const { highlightedTicketId, setHighlightedTicketId } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const socketRef = useRef(null);
+  const pendingServedTicketId = useRef(null);
+  const [arduinoConnected, setArduinoConnected] = useState(false);
+  const arduinoPortRef = useRef(null);
+  const arduinoReaderRef = useRef(null);
+  const arduinoActionsRef = useRef({});
 
   const latest = useRef({});
 
@@ -39,7 +44,17 @@ const Adminmanagement = ({ officeType }) => {
     socketRef.current = io(LOCAL_SERVER_URL, { transports: ['polling', 'websocket'] });
 
     socketRef.current.on('ticketsUpdated', (allTickets) => {
-      setTickets(allTickets.filter(t => t.office === officeType));
+      const officeTickets = allTickets.filter(t => t.office === officeType);
+      setTickets(officeTickets);
+
+      const servedTicketId = pendingServedTicketId.current;
+      if (servedTicketId && officeTickets.some(t => t.id === servedTicketId && t.status === 'Served')) {
+        const nextTicket = officeTickets
+          .filter(t => ['Waiting', 'Serving'].includes(t.status))
+          .sort((a, b) => String(a.queuedAt || a.timestamp).localeCompare(String(b.queuedAt || b.timestamp)))[0] || null;
+        pendingServedTicketId.current = null;
+        setSelectedTicket(nextTicket);
+      }
     });
 
     socketRef.current.on('pauseStateChanged', (pauseStates) => {
@@ -135,8 +150,8 @@ const Adminmanagement = ({ officeType }) => {
   };
 
   const updateStatus = (id, newStatus) => {
+    if (newStatus === 'Served') pendingServedTicketId.current = id;
     socketRef.current.emit('adminUpdateTicketStatus', { id, status: newStatus });
-    if (newStatus === 'Served') setSelectedTicket(null);
   };
 
   const executeCallAlertSequence = (ticket, select = true) => {
@@ -181,11 +196,11 @@ const Adminmanagement = ({ officeType }) => {
   const updateTransferField = (field) => (e) =>
     setTransferForm(prev => ({ ...prev, [field]: e.target.value }));
 
-  const showFlash = (text) => {
+  const showFlash = useCallback((text) => {
     setFlash(text);
     clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(''), 6000);
-  };
+  }, []);
 
   const submitTransfer = (e) => {
     e.preventDefault();
@@ -268,6 +283,164 @@ const Adminmanagement = ({ officeType }) => {
       socketRef.current.emit('adminToggleQueueOpen', { office: officeType });
     }
   };
+
+  useEffect(() => {
+    arduinoActionsRef.current = {
+      'CALL NEXT': callNext,
+      'BULK CALL': callBulk,
+      'PAUSE / RESUME': togglePause,
+      'CLOSE / REOPEN': toggleQueueOpen,
+    };
+  });
+
+  const readArduinoPort = useCallback(async (port) => {
+    let reader;
+
+    try {
+      if (!port.readable) throw new Error('The Arduino serial port is not readable.');
+      reader = port.readable.getReader();
+      arduinoReaderRef.current = reader;
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        lines.forEach((line) => {
+          const command = line.trim().replace(/^Pressed:\s*/i, '').toUpperCase();
+          const action = arduinoActionsRef.current[command];
+          if (action) action();
+        });
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        showFlash(`Arduino connection error: ${error.message}`);
+      }
+    } finally {
+      if (reader) {
+        reader.releaseLock();
+        if (arduinoReaderRef.current === reader) arduinoReaderRef.current = null;
+      }
+
+      if (arduinoPortRef.current === port) {
+        arduinoPortRef.current = null;
+        setArduinoConnected(false);
+        try {
+          await port.close();
+        } catch (error) {
+          showFlash(`Could not close the Arduino port: ${error.message}`);
+        }
+      }
+    }
+  }, [showFlash]);
+
+  const openArduinoPort = useCallback(async (port) => {
+    if (arduinoPortRef.current) return;
+
+    let opened = false;
+    try {
+      await port.open({ baudRate: 9600 });
+      opened = true;
+      if (!port.readable) throw new Error('The selected port has no readable serial stream.');
+
+      arduinoPortRef.current = port;
+      setArduinoConnected(true);
+      void readArduinoPort(port);
+    } catch (error) {
+      if (opened) {
+        try {
+          await port.close();
+        } catch (closeError) {
+          console.error('Could not close the Arduino port after connection failed:', closeError);
+        }
+      }
+
+      const portBusy = /failed to open serial port|access denied|resource busy/i.test(error.message);
+      const hint = portBusy
+        ? ' Close Arduino IDE Serial Monitor and any other app using the port, then retry.'
+        : '';
+      showFlash(`Could not connect to Arduino: ${error.message}.${hint}`);
+    }
+  }, [readArduinoPort, showFlash]);
+
+  const connectArduino = useCallback(async () => {
+    if (!('serial' in navigator)) {
+      showFlash('Arduino serial access requires Chrome or Edge on localhost or HTTPS.');
+      return;
+    }
+
+    try {
+      const ports = await navigator.serial.getPorts();
+      const port = ports.length === 1 ? ports[0] : await navigator.serial.requestPort();
+      await openArduinoPort(port);
+    } catch (error) {
+      if (error.name !== 'NotFoundError') {
+        showFlash(`Could not connect to Arduino: ${error.message}`);
+      }
+    }
+  }, [openArduinoPort, showFlash]);
+
+  const disconnectArduino = useCallback(async () => {
+    if (!arduinoReaderRef.current) return;
+    try {
+      await arduinoReaderRef.current.cancel();
+    } catch (error) {
+      showFlash(`Could not disconnect Arduino: ${error.message}`);
+    }
+  }, [showFlash]);
+
+  useEffect(() => {
+    let active = true;
+
+    const reconnectAuthorizedArduino = async () => {
+      if (!('serial' in navigator)) return;
+      try {
+        const ports = await navigator.serial.getPorts();
+        if (active && ports.length === 1) {
+          await openArduinoPort(ports[0]);
+        }
+      } catch (error) {
+        if (active) showFlash(`Could not reconnect to Arduino: ${error.message}`);
+      }
+    };
+
+    void reconnectAuthorizedArduino();
+
+    return () => {
+      active = false;
+      if (arduinoReaderRef.current) {
+        void arduinoReaderRef.current.cancel().catch((error) => {
+          console.error('Could not stop the Arduino reader:', error);
+        });
+      }
+    };
+  }, [openArduinoPort, showFlash]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!event.ctrlKey || !event.altKey || !event.shiftKey || event.metaKey || event.repeat || transferOpen) return;
+      if (document.activeElement?.matches('input, textarea, select, [contenteditable="true"]')) return;
+
+      const actions = {
+        n: callNext,
+        b: callBulk,
+        p: togglePause,
+        o: toggleQueueOpen,
+      };
+      const action = actions[event.key.toLowerCase()];
+      if (!action) return;
+
+      event.preventDefault();
+      action();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
 
   return (
     <div className="admin-layout">
@@ -393,6 +566,16 @@ const Adminmanagement = ({ officeType }) => {
             <button
               type="button"
               className="btn-emergency-toggle"
+              onClick={arduinoConnected ? disconnectArduino : connectArduino}
+              aria-pressed={arduinoConnected}
+              title="Close Arduino IDE Serial Monitor before connecting."
+            >
+              {arduinoConnected ? 'Disconnect Uno' : 'Connect Uno'}
+              <span className={`queue-status-dot${arduinoConnected ? ' active' : ''}`} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="btn-emergency-toggle"
               onClick={() => setEmergencyControlsOpen((open) => !open)}
               aria-expanded={emergencyControlsOpen}
               aria-controls="queue-emergency-popover"
@@ -431,6 +614,8 @@ const Adminmanagement = ({ officeType }) => {
                 className={`btn-emergency btn-emergency-pause${isPaused ? ' resume' : ''}`}
                 onClick={togglePause}
                 aria-pressed={isPaused}
+                aria-keyshortcuts="Control+Alt+Shift+P"
+                title="Arduino shortcut: Ctrl+Alt+Shift+P"
               >
                 {isPaused ? 'Resume service' : 'Pause service'}
                 <small>{isPaused ? 'Allow calls again' : 'Temporarily stop calls'}</small>
@@ -439,6 +624,8 @@ const Adminmanagement = ({ officeType }) => {
                 className={`btn-emergency btn-emergency-close${isClosed ? ' reopen' : ''}`}
                 onClick={toggleQueueOpen}
                 aria-pressed={isClosed}
+                aria-keyshortcuts="Control+Alt+Shift+O"
+                title="Arduino shortcut: Ctrl+Alt+Shift+O"
               >
                 {isClosed ? 'Reopen queue' : 'Close queue'}
                 <small>{isClosed ? 'Accept new tickets' : 'Stop new ticket requests'}</small>
@@ -479,6 +666,8 @@ const Adminmanagement = ({ officeType }) => {
               className="btn-call-next"
               onClick={callNext}
               disabled={isPaused || isClosed || waitingList.length === 0}
+              aria-keyshortcuts="Control+Alt+Shift+N"
+              title="Arduino shortcut: Ctrl+Alt+Shift+N"
             >
               Call next ticket
               <small>One ticket</small>
@@ -487,6 +676,8 @@ const Adminmanagement = ({ officeType }) => {
               className="btn-call-bulk"
               onClick={callBulk}
               disabled={isPaused || isClosed || waitingList.length === 0}
+              aria-keyshortcuts="Control+Alt+Shift+B"
+              title="Arduino shortcut: Ctrl+Alt+Shift+B"
             >
               Bulk call
               <small>Up to 10 tickets</small>

@@ -1,89 +1,223 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import '../../styles/Dashboard.css';
 
 const LOCAL_SERVER_URL = import.meta.env.DEV
   ? `http://${window.location.hostname}:5000`
   : window.location.origin;
+
+const OFFICE_LABELS = {
+  registrar: 'Registrar',
+  cashier: 'Cashier',
+  principal: "Principal's Office",
+};
+
+const STATUS_COLORS = {
+  Served: '#15803d',
+  Waiting: '#d97706',
+  Serving: '#2563eb',
+  'On hold': '#7c3aed',
+  Other: '#94a3b8',
+};
+
+const getDayKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const DashboardStats = ({ officeType }) => {
-  const [stats, setStats] = useState({ totalServed: 0, currentlyWaiting: 0, totalTicketsToday: 0 });
+  const [tickets, setTickets] = useState([]);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
     const socket = io(LOCAL_SERVER_URL, { transports: ['polling', 'websocket'] });
 
+    socket.on('connect', () => setIsConnected(true));
+    socket.on('disconnect', () => setIsConnected(false));
     socket.on('ticketsUpdated', (allTickets) => {
-      const officeTickets = allTickets.filter(t => t.office === officeType);
-      const served = officeTickets.filter(t => t.status === 'Served').length;
-      const waiting = officeTickets.filter(t => t.status === 'Waiting').length;
-
-      setStats({
-        totalServed: served,
-        currentlyWaiting: waiting,
-        totalTicketsToday: officeTickets.length
-      });
+      setTickets(allTickets.filter((ticket) => ticket.office === officeType));
     });
 
     return () => socket.disconnect();
   }, [officeType]);
 
-  const pieData = [
-    { name: 'Served', value: stats.totalServed, color: '#4CAF50' },
-    { name: 'Waiting', value: stats.currentlyWaiting, color: '#FF9800' }
-  ];
+  const todayKey = getDayKey(new Date());
+  const todayTickets = useMemo(
+    () => tickets.filter((ticket) => {
+      const date = new Date(ticket.timestamp);
+      return !Number.isNaN(date.getTime()) && getDayKey(date) === todayKey;
+    }),
+    [tickets, todayKey]
+  );
 
-  const barData = [
-    { name: 'Stats', 
-      Served: stats.totalServed, 
-      Waiting: stats.currentlyWaiting, 
-      Total: stats.totalTicketsToday }
-  ];
+  const stats = useMemo(() => ({
+    issuedToday: todayTickets.length,
+    servedToday: todayTickets.filter((ticket) => ticket.status === 'Served').length,
+    waitingNow: tickets.filter((ticket) => ticket.status === 'Waiting').length,
+    servingNow: tickets.filter((ticket) => ticket.status === 'Serving').length,
+    completionRate: todayTickets.length
+      ? Math.round((todayTickets.filter((ticket) => ticket.status === 'Served').length / todayTickets.length) * 100)
+      : 0,
+  }), [tickets, todayTickets]);
+
+  const weeklyData = useMemo(() => {
+    const startDate = new Date();
+    startDate.setHours(0, 0, 0, 0);
+    startDate.setDate(startDate.getDate() - 6);
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + index);
+      const key = getDayKey(date);
+      const dayTickets = tickets.filter((ticket) => {
+        const timestamp = new Date(ticket.timestamp);
+        return !Number.isNaN(timestamp.getTime()) && getDayKey(timestamp) === key;
+      });
+
+      return {
+        day: date.toLocaleDateString(undefined, { weekday: 'short' }),
+        issued: dayTickets.length,
+        served: dayTickets.filter((ticket) => ticket.status === 'Served').length,
+      };
+    });
+  }, [tickets]);
+
+  const statusData = useMemo(() => {
+    const counts = [
+      ['Served', todayTickets.filter((ticket) => ticket.status === 'Served').length],
+      ['Waiting', todayTickets.filter((ticket) => ticket.status === 'Waiting').length],
+      ['Serving', todayTickets.filter((ticket) => ticket.status === 'Serving').length],
+      ['On hold', todayTickets.filter((ticket) => ticket.status === 'On Hold').length],
+      ['Other', todayTickets.filter((ticket) => ticket.status === 'Expired').length],
+    ];
+    return counts
+      .filter(([, value]) => value > 0)
+      .map(([name, value]) => ({ name, value }));
+  }, [todayTickets]);
+
+  const officeLabel = OFFICE_LABELS[officeType] || 'Office';
+  const todayLabel = new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
 
   return (
-    <div className="stats-container">
-      <header className="section-header">Office Performance Dashboard</header>
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-info">
-            <h3>Total Served</h3>
-            <p className="stat-number">{stats.totalServed}</p>
-          </div>
+    <div className="stats-page">
+      <header className="stats-header">
+        <div>
+          <p className="stats-eyebrow">OFFICE OVERVIEW</p>
+          <h1>{officeLabel} statistics</h1>
+          <p className="stats-subtitle">Service performance and queue activity</p>
         </div>
-        <div className="stat-card highlight">
-          <div className="stat-info">
-            <h3>Current Queue</h3>
-            <p className="stat-number">{stats.currentlyWaiting}</p>
-          </div>
+        <div className="stats-header-meta">
+          <span className={`stats-live${isConnected ? ' connected' : ''}`}>
+            <span aria-hidden="true" />
+            {isConnected ? 'Live updates' : 'Reconnecting'}
+          </span>
+          <time>{todayLabel}</time>
         </div>
-        <div className="stat-card">
-          <div className="stat-info">
-            <h3>Total Tickets</h3>
-            <p className="stat-number">{stats.totalTicketsToday}</p>
-          </div>
-        </div>
-      </div>
-      <div className="charts-section" style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', marginTop: '30px' }}>
-        <div className="chart-wrapper" style={{ flex: 1, minWidth: '300px', background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-          <h4 className="text-center mb-3">Status Distribution</h4>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie data={pieData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-              </Pie>
-              <Tooltip /><Legend />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="chart-wrapper" style={{ flex: 1, minWidth: '300px', background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-          <h4 className="text-center mb-3">Service Comparison</h4>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={barData}>
-              <XAxis dataKey="name" hide /><YAxis /><Tooltip /><Legend />
-              <Bar dataKey="Served" fill="#4CAF50" radius={[5, 5, 0, 0]} />
-              <Bar dataKey="Waiting" fill="#FF9800" radius={[5, 5, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      </header>
+
+      <section className="stats-grid" aria-label="Today's key metrics">
+        <article className="stats-kpi stats-kpi-blue">
+          <span className="stats-kpi-label">Tickets issued today</span>
+          <strong>{stats.issuedToday}</strong>
+          <span className="stats-kpi-note">All ticket statuses</span>
+        </article>
+        <article className="stats-kpi stats-kpi-green">
+          <span className="stats-kpi-label">Served today</span>
+          <strong>{stats.servedToday}</strong>
+          <span className="stats-kpi-note">Completed transactions</span>
+        </article>
+        <article className="stats-kpi stats-kpi-amber">
+          <span className="stats-kpi-label">Waiting now</span>
+          <strong>{stats.waitingNow}</strong>
+          <span className="stats-kpi-note">Currently in the queue</span>
+        </article>
+        <article className="stats-kpi stats-kpi-violet">
+          <span className="stats-kpi-label">Completion today</span>
+          <strong>{stats.completionRate}%</strong>
+          <span className="stats-kpi-note">{stats.servingNow} currently being served</span>
+        </article>
+      </section>
+
+      <section className="stats-charts" aria-label="Queue performance charts">
+        <article className="stats-panel">
+          <header className="stats-panel-header">
+            <div>
+              <h2>Daily volume</h2>
+              <p>Tickets issued and served over the last seven days</p>
+            </div>
+          </header>
+          {weeklyData.some((day) => day.issued > 0) ? (
+            <div className="stats-chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={weeklyData} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
+                  <CartesianGrid stroke="#e8edf4" vertical={false} />
+                  <XAxis dataKey="day" axisLine={false} tickLine={false} />
+                  <YAxis allowDecimals={false} axisLine={false} tickLine={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="issued" name="Issued" fill="#93c5fd" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="served" name="Served" fill="#15803d" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="stats-chart-empty">No tickets have been issued in the last seven days.</div>
+          )}
+        </article>
+
+        <article className="stats-panel">
+          <header className="stats-panel-header">
+            <div>
+              <h2>Today's status</h2>
+              <p>Current outcome breakdown for tickets issued today</p>
+            </div>
+          </header>
+          {statusData.length > 0 ? (
+            <div className="stats-chart stats-donut-chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={statusData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={62}
+                    outerRadius={92}
+                    paddingAngle={3}
+                  >
+                    {statusData.map((entry) => (
+                      <Cell key={entry.name} fill={STATUS_COLORS[entry.name]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="stats-chart-empty">Today's status breakdown will appear when tickets are issued.</div>
+          )}
+        </article>
+      </section>
     </div>
   );
 };

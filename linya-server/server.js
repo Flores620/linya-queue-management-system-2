@@ -225,15 +225,53 @@ app.get('/api/tickets/claim/:claimCode', (req, res) => {
 
 app.get('/api/tickets/history/:office', (req, res) => {
   const history = state.tickets
-    .filter((t) => t.office === req.params.office && ['Served', 'Expired', 'Cancelled'].includes(t.status))
+    .filter((t) => t.office === req.params.office && ['Served', 'Expired'].includes(t.status))
     .sort((a, b) => String(b.completedAt || b.timestamp).localeCompare(String(a.completedAt || a.timestamp)));
   res.json(history);
 });
 
 app.get('/api/tickets/history/:office/export', (req, res) => {
-  const rows = state.tickets.filter((t) =>
-    t.office === req.params.office && ['Served', 'Expired', 'Cancelled'].includes(t.status)
-  );
+  const { period = 'all', value } = req.query;
+  const reportValue = String(value || '');
+  if (!OFFICES.includes(req.params.office)) {
+    return res.status(400).json({ error: 'Invalid office for report.' });
+  }
+
+  if (period === 'daily') {
+    const [year, month, day] = reportValue.split('-').map(Number);
+    const reportDate = new Date(year, month - 1, day);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(reportValue) ||
+        reportDate.getFullYear() !== year ||
+        reportDate.getMonth() !== month - 1 ||
+        reportDate.getDate() !== day) {
+      return res.status(400).json({ error: 'Choose a valid date for the daily report.' });
+    }
+  } else if (period === 'monthly') {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(reportValue)) {
+      return res.status(400).json({ error: 'Choose a valid month for the monthly report.' });
+    }
+  } else if (period === 'yearly') {
+    if (!/^\d{4}$/.test(reportValue) || Number(reportValue) < 1) {
+      return res.status(400).json({ error: 'Choose a valid year for the yearly report.' });
+    }
+  } else if (period !== 'all') {
+    return res.status(400).json({ error: 'Choose a supported report period.' });
+  }
+
+  const rows = state.tickets
+    .filter((ticket) => {
+      if (ticket.office !== req.params.office || !['Served', 'Expired'].includes(ticket.status)) return false;
+      if (period === 'all') return true;
+
+      const completedAt = new Date(ticket.completedAt || ticket.timestamp);
+      if (Number.isNaN(completedAt.getTime())) return false;
+      const dateKey = toDateKey(completedAt);
+      if (period === 'daily') return dateKey === reportValue;
+      if (period === 'monthly') return dateKey.startsWith(reportValue);
+      return dateKey.startsWith(reportValue);
+    })
+    .sort((a, b) => String(b.completedAt || b.timestamp).localeCompare(String(a.completedAt || a.timestamp)));
+
   const header = ['Ticket Number', 'Name', 'Client Type', 'Student ID', 'Purpose', 'Status', 'Issued At', 'Completed At'];
   const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [
@@ -243,8 +281,9 @@ app.get('/api/tickets/history/:office/export', (req, res) => {
       t.timestamp, t.completedAt || '',
     ].map(escape).join(',')),
   ].join('\n');
+  const periodSuffix = period === 'all' ? `history-${toDateKey()}` : `${period}-${reportValue}`;
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${req.params.office}-history-${toDateKey()}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${req.params.office}-${periodSuffix}.csv"`);
   res.send(csv);
 });
 
