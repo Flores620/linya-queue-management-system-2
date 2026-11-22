@@ -4,7 +4,7 @@ The school PC is the LAN server. It serves the built frontend, queue API, and So
 
 ## Deploying on Render
 
-The repository includes a `render.yaml` Blueprint. In Render, create a new Blueprint from this repository and leave the root directory unset. After the service is created, add `FIREBASE_KEY` in its Environment settings with the complete service-account JSON as the value; mark it secret. Never commit or paste the key into source files.
+The repository includes a `render.yaml` Blueprint. In Render, create a new Blueprint from this repository and leave the root directory unset. The Blueprint sets `TZ=Asia/Manila` so office hours, ticket dates, and closing rollover use Philippine local time. If configuring a Web Service manually, add `TZ` with value `Asia/Manila` in its Environment settings. Add `FIREBASE_KEY` there with the complete service-account JSON as the value; mark it secret. Never commit or paste the key into source files.
 
 The Blueprint builds the frontend and server, starts the server, and uses `/api/health` for health checks. After deployment, confirm that `cloudSync.enabled` is `true` and `cloudSync.lastSuccess` has a timestamp at `https://<your-service>.onrender.com/api/health`.
 

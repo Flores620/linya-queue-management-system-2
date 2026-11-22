@@ -10,5 +10,7 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: TZ
+        value: Asia/Manila
       - key: FIREBASE_KEY
         sync: false
