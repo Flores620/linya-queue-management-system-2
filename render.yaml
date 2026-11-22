@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: linya-queue-management-system
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: cd frontend && npm ci && npm run build && cd ../linya-server && npm ci
+    startCommand: cd linya-server && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FIREBASE_KEY
+        sync: false

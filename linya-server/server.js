@@ -11,7 +11,9 @@ const PDFDocument = require('pdfkit');
 const OFFICES = ['registrar', 'cashier', 'principal'];
 const PREFIX = { registrar: 'R-', cashier: 'C-', principal: 'P-' };
 const OFFICE_LABELS = { registrar: 'Registrar', cashier: 'Cashier', principal: "Principal's Office" };
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'queue-data.json');
 
 function historyOffice(ticket) {

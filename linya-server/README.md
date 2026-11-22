@@ -2,6 +2,14 @@
 
 The school PC is the LAN server. It serves the built frontend, queue API, and Socket.IO updates on port `5000`. Local queue data is saved in `data/queue-data.json`; Firestore is synchronized as an online copy and recovery source.
 
+## Deploying on Render
+
+The repository includes a `render.yaml` Blueprint. In Render, create a new Blueprint from this repository and leave the root directory unset. After the service is created, add `FIREBASE_KEY` in its Environment settings with the complete service-account JSON as the value; mark it secret. Never commit or paste the key into source files.
+
+The Blueprint builds the frontend and server, starts the server, and uses `/api/health` for health checks. After deployment, confirm that `cloudSync.enabled` is `true` and `cloudSync.lastSuccess` has a timestamp at `https://<your-service>.onrender.com/api/health`.
+
+The free Render filesystem is ephemeral. Firestore is required to recover queue state after a service restart; for durable local-file storage, attach a persistent disk mounted at `/var/data` and set `DATA_DIR` to `/var/data` in the service environment. Render also cannot serve campus devices when their internet connection is down or directly access a printer attached to the school PC. Use the school-PC LAN setup below if offline campus service and local printing are required.
+
 ## Initial setup on the school PC
 
 1. Install a supported Node.js LTS release.
