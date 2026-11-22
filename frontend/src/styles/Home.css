@@ -714,12 +714,25 @@
   white-space: nowrap;
 }
 
+.display-status {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  border: 1px solid transparent;
+}
+
 .display-paused {
   color: #b45309;
   background: #fffbeb;
-  border-radius: 999px;
-  padding: 3px 6px;
-  font-size: 0.62rem;
+  border-color: #fcd34d;
+}
+
+.display-closed {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fca5a5;
 }
 
 .display-serving-list {

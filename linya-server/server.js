@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -9,8 +10,50 @@ const PDFDocument = require('pdfkit');
 
 const OFFICES = ['registrar', 'cashier', 'principal'];
 const PREFIX = { registrar: 'R-', cashier: 'C-', principal: 'P-' };
+const OFFICE_LABELS = { registrar: 'Registrar', cashier: 'Cashier', principal: "Principal's Office" };
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'queue-data.json');
+
+function historyOffice(ticket) {
+  if (!ticket?.isTransferred) return ticket?.office;
+  if (OFFICES.includes(ticket.transferredFrom)) return ticket.transferredFrom;
+  const originalNumber = String(ticket.originalNumber || ticket.previousNumber || '');
+  if (originalNumber.startsWith(PREFIX.registrar)) return 'registrar';
+  if (originalNumber.startsWith(PREFIX.cashier)) return 'cashier';
+  if (originalNumber.startsWith(PREFIX.principal)) return 'principal';
+  return ticket.office;
+}
+
+function belongsToHistoryOffice(ticket, office) {
+  if (!ticket || !OFFICES.includes(office)) return false;
+  if (!ticket.isTransferred) return ticket.office === office;
+
+  const source = historyOffice(ticket);
+  const destination = OFFICES.includes(ticket.transferredTo)
+    ? ticket.transferredTo
+    : ticket.office;
+  return office === source || office === destination;
+}
+
+function historyTransferLabel(ticket, office) {
+  if (!ticket?.isTransferred) return '';
+  const source = historyOffice(ticket);
+  const destination = OFFICES.includes(ticket.transferredTo) ? ticket.transferredTo : ticket.office;
+  if (source === office) return `TRANSFERRED TO ${OFFICE_LABELS[destination] || destination}`;
+  if (destination === office) return `TRANSFERRED FROM ${OFFICE_LABELS[source] || source}`;
+  return 'TRANSFERRED';
+}
+
+function historyStatus(ticket, office) {
+  return ticket?.isTransferred && historyOffice(ticket) === office ? 'Served' : ticket?.status;
+}
+
+function historyTicketNumber(ticket, office) {
+  if (ticket?.isTransferred && historyOffice(ticket) === office) {
+    return ticket.previousNumber || ticket.originalNumber || ticket.number;
+  }
+  return ticket?.number;
+}
 const PRINT_DIR = path.join(DATA_DIR, 'print-jobs');
 fs.mkdirSync(PRINT_DIR, { recursive: true });
 const LOCATION_RADIUS_METERS = Number(process.env.CAMPUS_RADIUS_METERS || 500);
@@ -48,7 +91,17 @@ const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*' }));
 app.use(express.json({ limit: '1mb' }));
 
-const server = http.createServer(app);
+const tlsCertPath = process.env.LOCAL_TLS_CERT_PATH;
+const tlsKeyPath = process.env.LOCAL_TLS_KEY_PATH;
+if (!!tlsCertPath !== !!tlsKeyPath) {
+  throw new Error('Set both LOCAL_TLS_CERT_PATH and LOCAL_TLS_KEY_PATH to enable local HTTPS.');
+}
+const server = tlsCertPath
+  ? https.createServer({
+    cert: fs.readFileSync(tlsCertPath),
+    key: fs.readFileSync(tlsKeyPath),
+  }, app)
+  : http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
 function defaultState() {
@@ -57,6 +110,8 @@ function defaultState() {
     counters: { registrar: {}, cashier: {}, principal: {} },
     pauseStates: { registrar: false, cashier: false, principal: false },
     closedStates: { registrar: false, cashier: false, principal: false },
+    officeStateUpdatedAt: new Date(0).toISOString(),
+    cloudSyncInitializedAt: null,
   };
 }
 
@@ -69,6 +124,8 @@ function loadState() {
       counters: parsed.counters || defaultState().counters,
       pauseStates: parsed.pauseStates || defaultState().pauseStates,
       closedStates: parsed.closedStates || defaultState().closedStates,
+      officeStateUpdatedAt: parsed.officeStateUpdatedAt || new Date(0).toISOString(),
+      cloudSyncInitializedAt: parsed.cloudSyncInitializedAt || null,
     };
   } catch (error) {
     console.error('Could not read local queue backup:', error.message);
@@ -78,7 +135,11 @@ function loadState() {
 
 let state = loadState();
 let lastScheduleKey = '';
-let lastRolloverDate = toDateKey();
+let lastRolloverDate = '';
+let cloudSyncInProgress = false;
+let cloudSyncLastSuccess = null;
+let cloudSyncError = null;
+let cloudSyncReady = !firestoreEnabled || Boolean(state.cloudSyncInitializedAt);
 
 function persist() {
   const temp = `${DATA_FILE}.${process.pid}.tmp`;
@@ -87,9 +148,11 @@ function persist() {
 }
 
 function cloudWrite(doc, value) {
-  if (firestoreEnabled) db.collection(doc).doc(value.id).set(value).catch((error) =>
-    console.log('Cloud backup deferred:', error.message)
-  );
+  if (!firestoreEnabled) return;
+  db.collection(doc).doc(value.id).set(value).catch((error) => {
+    cloudSyncError = error.message;
+    console.log('Cloud backup deferred:', error.message);
+  });
 }
 
 function cloudWriteCounter(office, dateKey) {
@@ -100,7 +163,186 @@ function cloudWriteCounter(office, dateKey) {
     lastNumber: state.counters[office][dateKey] || 0,
     isPaused: state.pauseStates[office],
     isClosed: state.closedStates[office],
-  }, { merge: true }).catch((error) => console.log('Cloud counter backup deferred:', error.message));
+  }, { merge: true }).catch((error) => {
+    cloudSyncError = error.message;
+    console.log('Cloud counter backup deferred:', error.message);
+  });
+}
+
+function cloudWriteOfficeState() {
+  if (!firestoreEnabled) return;
+  db.collection('queueState').doc('current').set({
+    pauseStates: state.pauseStates,
+    closedStates: state.closedStates,
+    updatedAt: state.officeStateUpdatedAt,
+  }, { merge: true }).catch((error) => {
+    cloudSyncError = error.message;
+    console.log('Cloud office state backup deferred:', error.message);
+  });
+}
+
+function ticketVersion(ticket) {
+  const updatedAt = Date.parse(ticket.updatedAt || '');
+  if (Number.isFinite(updatedAt)) return updatedAt;
+  const timestamps = [
+    ticket.transferredAt,
+    ticket.completedAt,
+    ticket.servingAt,
+    ticket.queuedAt,
+    ticket.timestamp,
+  ].map((value) => Date.parse(value || '')).filter(Number.isFinite);
+  return timestamps.length ? Math.max(...timestamps) : 0;
+}
+
+function chunks(items, size) {
+  const result = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size));
+  }
+  return result;
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function syncFirestoreState() {
+  if (!firestoreEnabled || cloudSyncInProgress) return;
+  cloudSyncInProgress = true;
+
+  try {
+    const [cloudTickets, cloudCounters, cloudOfficeState] = await Promise.all([
+      db.collection('tickets').get(),
+      db.collection('counters').get(),
+      db.collection('queueState').doc('current').get(),
+    ]);
+
+    let localChanged = false;
+    let ticketsChanged = false;
+    let schedulesChanged = false;
+    const ticketWrites = [];
+    const remoteTicketById = new Map();
+
+    cloudTickets.forEach((doc) => {
+      remoteTicketById.set(doc.id, { ...doc.data(), id: doc.id });
+    });
+
+    const localTicketById = new Map(state.tickets.map((ticket) => [ticket.id, ticket]));
+    for (const [id, remoteTicket] of remoteTicketById) {
+      const localTicket = localTicketById.get(id);
+      if (!localTicket) {
+        state.tickets.push(remoteTicket);
+        localChanged = true;
+        ticketsChanged = true;
+      } else if (ticketVersion(remoteTicket) > ticketVersion(localTicket)) {
+        const index = state.tickets.findIndex((ticket) => ticket.id === id);
+        state.tickets[index] = remoteTicket;
+        localChanged = true;
+        ticketsChanged = true;
+      } else if (stableStringify(localTicket) !== stableStringify(remoteTicket)) {
+        ticketWrites.push(localTicket);
+      }
+    }
+
+    for (const localTicket of state.tickets) {
+      if (!remoteTicketById.has(localTicket.id)) ticketWrites.push(localTicket);
+    }
+
+    const remoteCounters = new Map();
+    cloudCounters.forEach((doc) => {
+      const counter = doc.data();
+      if (!OFFICES.includes(counter.office) || !counter.date) return;
+      const key = `${counter.office}_${counter.date}`;
+      remoteCounters.set(key, counter);
+      state.counters[counter.office] ||= {};
+      const localCount = state.counters[counter.office][counter.date] || 0;
+      if (counter.lastNumber > localCount) {
+        state.counters[counter.office][counter.date] = counter.lastNumber;
+        localChanged = true;
+      }
+    });
+
+    const counterWrites = [];
+    OFFICES.forEach((office) => {
+      Object.entries(state.counters[office] || {}).forEach(([date, lastNumber]) => {
+        const key = `${office}_${date}`;
+        if (!remoteCounters.has(key) || lastNumber > (remoteCounters.get(key).lastNumber || 0)) {
+          counterWrites.push({
+            id: key,
+            office,
+            date,
+            lastNumber,
+            isPaused: state.pauseStates[office],
+            isClosed: state.closedStates[office],
+          });
+        }
+      });
+    });
+
+    const remoteState = cloudOfficeState.exists ? cloudOfficeState.data() : null;
+    const localStateVersion = Date.parse(state.officeStateUpdatedAt || '') || 0;
+    const remoteStateVersion = Date.parse(remoteState?.updatedAt || '') || 0;
+    if (remoteState && remoteStateVersion > localStateVersion) {
+      state.pauseStates = { ...state.pauseStates, ...(remoteState.pauseStates || {}) };
+      state.closedStates = { ...state.closedStates, ...(remoteState.closedStates || {}) };
+      state.officeStateUpdatedAt = remoteState.updatedAt;
+      localChanged = true;
+      schedulesChanged = true;
+    }
+
+    if (localChanged) persist();
+    if (ticketsChanged) broadcastTickets();
+    if (schedulesChanged) {
+      io.emit('pauseStateChanged', { ...state.pauseStates });
+      io.emit('closedStateChanged', { ...state.closedStates });
+      io.emit('officeStatesUpdated', {
+        pauseStates: { ...state.pauseStates },
+        closedStates: { ...state.closedStates },
+      });
+    }
+
+    const writes = [];
+    ticketWrites.forEach((ticket) => {
+      if (ticket) writes.push({ ref: db.collection('tickets').doc(ticket.id), value: ticket });
+    });
+    counterWrites.forEach((counter) => {
+      writes.push({ ref: db.collection('counters').doc(counter.id), value: counter });
+    });
+
+    const localOfficeState = {
+      pauseStates: state.pauseStates,
+      closedStates: state.closedStates,
+      updatedAt: state.officeStateUpdatedAt,
+    };
+    if (!remoteState || localStateVersion >= remoteStateVersion) {
+      if (stableStringify(localOfficeState) !== stableStringify(remoteState || null)) {
+        writes.push({ ref: db.collection('queueState').doc('current'), value: localOfficeState });
+      }
+    }
+
+    for (const group of chunks(writes, 450)) {
+      const batch = db.batch();
+      group.forEach(({ ref, value }) => batch.set(ref, value));
+      await batch.commit();
+    }
+
+    cloudSyncLastSuccess = new Date().toISOString();
+    cloudSyncError = null;
+    if (!state.cloudSyncInitializedAt) {
+      state.cloudSyncInitializedAt = cloudSyncLastSuccess;
+      persist();
+    }
+    cloudSyncReady = true;
+  } catch (error) {
+    cloudSyncError = error.message;
+    console.error('Firestore synchronization deferred:', error.message);
+  } finally {
+    cloudSyncInProgress = false;
+  }
 }
 
 function toDateKey(date = new Date()) {
@@ -127,6 +369,9 @@ function haversineMeters(a, b) {
 
 function broadcastTickets() { io.emit('ticketsUpdated', state.tickets); }
 function broadcastSchedules() {
+  state.officeStateUpdatedAt = new Date().toISOString();
+  persist();
+  cloudWriteOfficeState();
   io.emit('pauseStateChanged', { ...state.pauseStates });
   io.emit('closedStateChanged', { ...state.closedStates });
   io.emit('officeStatesUpdated', {
@@ -136,15 +381,25 @@ function broadcastSchedules() {
 }
 
 function applyDailyRollover() {
-  const dateKey = toDateKey();
+  const now = new Date();
+  if (now.getHours() < 16) return;
+
+  const dateKey = toDateKey(now);
   if (dateKey === lastRolloverDate) return;
 
-  const previousDate = lastRolloverDate;
   let changed = 0;
   state.tickets.forEach((ticket) => {
     if (['Waiting', 'Serving', 'On Hold'].includes(ticket.status)) {
       ticket.status = 'Expired';
-      ticket.completedAt = new Date(`${previousDate}T16:00:00`).toISOString();
+      ticket.completedAt = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        16,
+        0,
+        0
+      ).toISOString();
+      ticket.updatedAt = ticket.completedAt;
       ticket.expiredReason = 'Not claimed before next office day';
       changed += 1;
       cloudWrite('tickets', ticket);
@@ -182,15 +437,24 @@ function applyOfficeSchedule() {
 
 applyOfficeSchedule();
 applyDailyRollover();
+syncFirestoreState();
 setInterval(() => {
   applyOfficeSchedule();
   applyDailyRollover();
+  syncFirestoreState();
 }, 30 * 1000);
 
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     mode: firestoreEnabled ? 'online-with-local-backup' : 'local-only',
+    cloudSync: {
+      enabled: firestoreEnabled,
+      ready: cloudSyncReady,
+      inProgress: cloudSyncInProgress,
+      lastSuccess: cloudSyncLastSuccess,
+      error: cloudSyncError,
+    },
     date: toDateKey(),
     offices: OFFICES,
   });
@@ -225,8 +489,8 @@ app.get('/api/tickets/claim/:claimCode', (req, res) => {
 
 app.get('/api/tickets/history/:office', (req, res) => {
   const history = state.tickets
-    .filter((t) => t.office === req.params.office && ['Served', 'Expired'].includes(t.status))
-    .sort((a, b) => String(b.completedAt || b.timestamp).localeCompare(String(a.completedAt || a.timestamp)));
+    .filter((t) => belongsToHistoryOffice(t, req.params.office))
+    .sort((a, b) => String(b.completedAt || b.transferredAt || b.timestamp).localeCompare(String(a.completedAt || a.transferredAt || a.timestamp)));
   res.json(history);
 });
 
@@ -260,25 +524,31 @@ app.get('/api/tickets/history/:office/export', (req, res) => {
 
   const rows = state.tickets
     .filter((ticket) => {
-      if (ticket.office !== req.params.office || !['Served', 'Expired'].includes(ticket.status)) return false;
+      if (!belongsToHistoryOffice(ticket, req.params.office)) return false;
       if (period === 'all') return true;
 
-      const completedAt = new Date(ticket.completedAt || ticket.timestamp);
+      const completedAt = new Date(ticket.completedAt || ticket.transferredAt || ticket.timestamp);
       if (Number.isNaN(completedAt.getTime())) return false;
       const dateKey = toDateKey(completedAt);
       if (period === 'daily') return dateKey === reportValue;
       if (period === 'monthly') return dateKey.startsWith(reportValue);
       return dateKey.startsWith(reportValue);
     })
-    .sort((a, b) => String(b.completedAt || b.timestamp).localeCompare(String(a.completedAt || a.timestamp)));
+    .sort((a, b) => String(b.completedAt || b.transferredAt || b.timestamp).localeCompare(String(a.completedAt || a.transferredAt || a.timestamp)));
 
-  const header = ['Ticket Number', 'Name', 'Client Type', 'Student ID', 'Purpose', 'Status', 'Issued At', 'Completed At'];
+  const header = ['Ticket #', 'Name', 'Student ID', 'Purpose', 'Transfer', 'Status', 'Activity'];
   const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [
     header.join(','),
     ...rows.map((t) => [
-      t.number, t.name, t.clientType, t.studentId === 'N/A' ? '' : t.studentId, t.purpose, t.status,
-      t.timestamp, t.completedAt || '',
+      historyTicketNumber(t, req.params.office),
+      t.name,
+      t.studentId || 'N/A',
+      t.purpose,
+      historyTransferLabel(t, req.params.office),
+      historyStatus(t, req.params.office),
+      new Date(t.completedAt || t.transferredAt || t.timestamp)
+        .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     ].map(escape).join(',')),
   ].join('\n');
   const periodSuffix = period === 'all' ? `history-${toDateKey()}` : `${period}-${reportValue}`;
@@ -361,6 +631,12 @@ app.post('/api/print-ticket', async (req, res) => {
 });
 
 app.post('/api/issue-ticket', (req, res) => {
+  if (!cloudSyncReady) {
+    return res.status(503).json({
+      error: 'Initial Firestore sync has not completed. Connect to the internet and try again.',
+    });
+  }
+
   const {
     name, studentId, purpose, office, clientType = 'student',
     location, requirePhoneLocation, idempotencyKey,
@@ -440,6 +716,7 @@ app.post('/api/issue-ticket', (req, res) => {
     transferredFrom: null,
     timestamp: now,
     queuedAt: now,
+    updatedAt: now,
   };
 
   state.tickets.push(ticket);
@@ -459,8 +736,10 @@ io.on('connection', (socket) => {
     const allowed = ['Waiting', 'Serving', 'On Hold', 'Served', 'Cancelled', 'Expired'];
     const ticket = state.tickets.find((t) => t.id === id);
     if (!ticket || !allowed.includes(status)) return;
+    const updatedAt = new Date().toISOString();
     ticket.status = status;
-    if (['Served', 'Cancelled', 'Expired'].includes(status)) ticket.completedAt = new Date().toISOString();
+    ticket.updatedAt = updatedAt;
+    if (['Served', 'Cancelled', 'Expired'].includes(status)) ticket.completedAt = updatedAt;
     persist();
     broadcastTickets();
     cloudWrite('tickets', ticket);
@@ -468,6 +747,9 @@ io.on('connection', (socket) => {
 
   socket.on('adminCallNext', ({ office }, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
+    if (!cloudSyncReady) {
+      return reply({ ok: false, error: 'Initial Firestore sync has not completed. Please try again shortly.' });
+    }
     if (!OFFICES.includes(office)) {
       return reply({ ok: false, error: 'A valid office is required to call the next ticket.' });
     }
@@ -481,6 +763,7 @@ io.on('connection', (socket) => {
 
     ticket.status = 'Serving';
     ticket.servingAt = new Date().toISOString();
+    ticket.updatedAt = ticket.servingAt;
     cloudWrite('tickets', ticket);
     persist();
     broadcastTickets();
@@ -489,6 +772,9 @@ io.on('connection', (socket) => {
 
   socket.on('adminCallBulk', ({ office, ids, count = 10 }, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
+    if (!cloudSyncReady) {
+      return reply({ ok: false, error: 'Initial Firestore sync has not completed. Please try again shortly.' });
+    }
     if (!OFFICES.includes(office)) {
       return reply({ ok: false, error: 'Queue cannot be called.' });
     }
@@ -504,6 +790,7 @@ io.on('connection', (socket) => {
     candidates.forEach((ticket) => {
       ticket.status = 'Serving';
       ticket.servingAt = servingAt;
+      ticket.updatedAt = servingAt;
       cloudWrite('tickets', ticket);
     });
     persist();
@@ -514,9 +801,14 @@ io.on('connection', (socket) => {
 
   socket.on('adminTransferTicket', (payload, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
+    if (!cloudSyncReady) {
+      return reply({ ok: false, error: 'Initial Firestore sync has not completed. Please try again shortly.' });
+    }
+
     const { id, newOffice, purpose, name, studentId } = payload || {};
     const ticket = state.tickets.find((t) => t.id === id);
     const target = String(newOffice || '').toLowerCase();
+    const source = ticket?.office;
     if (!ticket) return reply({ ok: false, error: 'Ticket not found.' });
     if (!OFFICES.includes(target)) return reply({ ok: false, error: 'Choose a valid office.' });
     if (target === ticket.office) return reply({ ok: false, error: 'Ticket is already in that office.' });
@@ -538,7 +830,10 @@ io.on('connection', (socket) => {
     ticket.studentId = ticket.clientType === 'student' ? normalizeStudentId(studentId) : 'N/A';
     ticket.status = 'Waiting';
     ticket.isTransferred = true;
-    ticket.transferredFrom = payload.office || ticket.transferredFrom;
+    ticket.transferredFrom = source;
+    ticket.transferredTo = target;
+    ticket.transferredAt = new Date().toISOString();
+    ticket.updatedAt = ticket.transferredAt;
     ticket.queuedAt = new Date().toISOString();
     persist();
     broadcastTickets();

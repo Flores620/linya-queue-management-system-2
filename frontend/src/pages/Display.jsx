@@ -20,6 +20,11 @@ function Display() {
     cashier: false,
     principal: false,
   });
+  const [closedStates, setClosedStates] = useState({
+    registrar: false,
+    cashier: false,
+    principal: false,
+  });
 
   useEffect(() => {
     socketRef.current = io(LOCAL_SERVER_URL, { transports: ['polling', 'websocket'] });
@@ -27,6 +32,14 @@ function Display() {
       setTickets(Array.isArray(allTickets) ? allTickets : []);
     });
     socketRef.current.on('pauseStateChanged', setPauseStates);
+    socketRef.current.on('closedStateChanged', setClosedStates);
+    Promise.all([
+      fetch(`${LOCAL_SERVER_URL}/api/pause-states`).then((res) => res.json()),
+      fetch(`${LOCAL_SERVER_URL}/api/closed-states`).then((res) => res.json()),
+    ]).then(([pauseData, closedData]) => {
+      setPauseStates(pauseData);
+      setClosedStates(closedData);
+    }).catch(() => {});
     return () => socketRef.current?.disconnect();
   }, []);
 
@@ -57,7 +70,11 @@ function Display() {
               <span>{waitingCount} Waiting</span>
             </div>
           </div>
-          {pauseStates[office.id] && <strong className="display-paused">PAUSED</strong>}
+          {closedStates[office.id] ? (
+            <strong className="display-status display-closed">CLOSED</strong>
+          ) : pauseStates[office.id] ? (
+            <strong className="display-status display-paused">BREAK</strong>
+          ) : null}
         </header>
 
         <div className="display-serving-list">

@@ -40,6 +40,27 @@ const getDayKey = (date) => {
   return `${year}-${month}-${day}`;
 };
 
+const OFFICE_PREFIXES = {
+  registrar: 'R-',
+  cashier: 'C-',
+  principal: 'P-',
+};
+
+const getTransferSource = (ticket) => {
+  if (ticket.transferredFrom) return ticket.transferredFrom;
+  const originalNumber = ticket.originalNumber || ticket.previousNumber || '';
+  return Object.keys(OFFICE_PREFIXES).find((office) => originalNumber.startsWith(OFFICE_PREFIXES[office]));
+};
+
+const belongsToOfficeStats = (ticket, officeType) =>
+  ticket.office === officeType || (ticket.isTransferred && getTransferSource(ticket) === officeType);
+
+const getOfficeTicketStatus = (ticket, officeType) =>
+  ticket.isTransferred && getTransferSource(ticket) === officeType ? 'Served' : ticket.status;
+
+const getOfficeActivityDate = (ticket) =>
+  new Date(ticket.isTransferred ? ticket.transferredAt || ticket.timestamp : ticket.timestamp);
+
 const DashboardStats = ({ officeType }) => {
   const [tickets, setTickets] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -50,7 +71,7 @@ const DashboardStats = ({ officeType }) => {
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
     socket.on('ticketsUpdated', (allTickets) => {
-      setTickets(allTickets.filter((ticket) => ticket.office === officeType));
+      setTickets(allTickets.filter((ticket) => belongsToOfficeStats(ticket, officeType)));
     });
 
     return () => socket.disconnect();
@@ -59,7 +80,7 @@ const DashboardStats = ({ officeType }) => {
   const todayKey = getDayKey(new Date());
   const todayTickets = useMemo(
     () => tickets.filter((ticket) => {
-      const date = new Date(ticket.timestamp);
+      const date = getOfficeActivityDate(ticket);
       return !Number.isNaN(date.getTime()) && getDayKey(date) === todayKey;
     }),
     [tickets, todayKey]
@@ -67,13 +88,13 @@ const DashboardStats = ({ officeType }) => {
 
   const stats = useMemo(() => ({
     issuedToday: todayTickets.length,
-    servedToday: todayTickets.filter((ticket) => ticket.status === 'Served').length,
-    waitingNow: tickets.filter((ticket) => ticket.status === 'Waiting').length,
-    servingNow: tickets.filter((ticket) => ticket.status === 'Serving').length,
+    servedToday: todayTickets.filter((ticket) => getOfficeTicketStatus(ticket, officeType) === 'Served').length,
+    waitingNow: tickets.filter((ticket) => ticket.office === officeType && ticket.status === 'Waiting').length,
+    servingNow: tickets.filter((ticket) => ticket.office === officeType && ticket.status === 'Serving').length,
     completionRate: todayTickets.length
-      ? Math.round((todayTickets.filter((ticket) => ticket.status === 'Served').length / todayTickets.length) * 100)
+      ? Math.round((todayTickets.filter((ticket) => getOfficeTicketStatus(ticket, officeType) === 'Served').length / todayTickets.length) * 100)
       : 0,
-  }), [tickets, todayTickets]);
+  }), [tickets, todayTickets, officeType]);
 
   const weeklyData = useMemo(() => {
     const startDate = new Date();
@@ -85,30 +106,30 @@ const DashboardStats = ({ officeType }) => {
       date.setDate(startDate.getDate() + index);
       const key = getDayKey(date);
       const dayTickets = tickets.filter((ticket) => {
-        const timestamp = new Date(ticket.timestamp);
+        const timestamp = getOfficeActivityDate(ticket);
         return !Number.isNaN(timestamp.getTime()) && getDayKey(timestamp) === key;
       });
 
       return {
         day: date.toLocaleDateString(undefined, { weekday: 'short' }),
         issued: dayTickets.length,
-        served: dayTickets.filter((ticket) => ticket.status === 'Served').length,
+        served: dayTickets.filter((ticket) => getOfficeTicketStatus(ticket, officeType) === 'Served').length,
       };
     });
-  }, [tickets]);
+  }, [tickets, officeType]);
 
   const statusData = useMemo(() => {
     const counts = [
-      ['Served', todayTickets.filter((ticket) => ticket.status === 'Served').length],
-      ['Waiting', todayTickets.filter((ticket) => ticket.status === 'Waiting').length],
-      ['Serving', todayTickets.filter((ticket) => ticket.status === 'Serving').length],
-      ['On hold', todayTickets.filter((ticket) => ticket.status === 'On Hold').length],
-      ['Other', todayTickets.filter((ticket) => ticket.status === 'Expired').length],
+      ['Served', todayTickets.filter((ticket) => getOfficeTicketStatus(ticket, officeType) === 'Served').length],
+      ['Waiting', todayTickets.filter((ticket) => getOfficeTicketStatus(ticket, officeType) === 'Waiting').length],
+      ['Serving', todayTickets.filter((ticket) => getOfficeTicketStatus(ticket, officeType) === 'Serving').length],
+      ['On hold', todayTickets.filter((ticket) => getOfficeTicketStatus(ticket, officeType) === 'On Hold').length],
+      ['Other', todayTickets.filter((ticket) => getOfficeTicketStatus(ticket, officeType) === 'Expired').length],
     ];
     return counts
       .filter(([, value]) => value > 0)
       .map(([name, value]) => ({ name, value }));
-  }, [todayTickets]);
+  }, [todayTickets, officeType]);
 
   const officeLabel = OFFICE_LABELS[officeType] || 'Office';
   const todayLabel = new Date().toLocaleDateString(undefined, {

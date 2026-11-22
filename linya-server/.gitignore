@@ -7,6 +7,8 @@ build/
 firebase-key.json
 .env
 .env.local
+data/queue-data.json
+data/print-jobs/
 
 # Operating system trash files
 .DS_Store

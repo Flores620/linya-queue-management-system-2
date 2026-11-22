@@ -13,6 +13,34 @@ const OFFICE_OPTIONS = [
   { id: 'principal', label: "Principal's Office" },
 ];
 
+const OFFICE_PURPOSES = {
+  registrar: [
+    'Request of Transcript of Records (TOR)',
+    'Request of Certificate of Grades',
+    'Request of Good Moral Certificate',
+    'Request of Certificate of Enrollment',
+    'Request of Diploma',
+    'Correction of Records (Name, Birthdate, etc.)',
+    'ID Validation / Verification',
+  ],
+  cashier: [
+    'Payment of Tuition',
+    'Payment of Enrollment',
+    'Payment of Laboratory Fees',
+    'Payment of Document Fees',
+    'Request for Refund',
+  ],
+  principal: [
+    'Disciplinary Concern / Incident Report',
+    'Parent-Teacher Conference Request',
+    'Appeal / Grievance Filing',
+    'Scholarship Endorsement',
+    'Excuse Letter / Absence Justification',
+    'School Policy Inquiry',
+    'General Consultation',
+  ],
+};
+
 const Adminmanagement = ({ officeType }) => {
   const [tickets, setTickets] = useState([]);
   const [selectedTicket, setSelectedTicket] = useState(null);
@@ -179,7 +207,7 @@ const Adminmanagement = ({ officeType }) => {
     if (!selectedTicket) return;
     setTransferForm({
       office: '',
-      purpose: selectedTicket.purpose || '',
+      purpose: '',
       name: selectedTicket.name || '',
       studentId: selectedTicket.studentId === 'N/A' ? '' : (selectedTicket.studentId || ''),
     });
@@ -193,8 +221,14 @@ const Adminmanagement = ({ officeType }) => {
     setTransferOpen(false);
   };
 
-  const updateTransferField = (field) => (e) =>
-    setTransferForm(prev => ({ ...prev, [field]: e.target.value }));
+  const updateTransferField = (field) => (e) => {
+    const value = e.target.value;
+    setTransferForm(prev => ({
+      ...prev,
+      [field]: value,
+      ...(field === 'office' ? { purpose: '' } : {}),
+    }));
+  };
 
   const showFlash = useCallback((text) => {
     setFlash(text);
@@ -466,6 +500,14 @@ const Adminmanagement = ({ officeType }) => {
                 <div className="form-input">{selectedTicket.name}</div>
               </div>
               <div className="form-group">
+                <label>Client Type</label>
+                <div className="form-input">
+                  {selectedTicket.clientType
+                    ? selectedTicket.clientType.charAt(0).toUpperCase() + selectedTicket.clientType.slice(1)
+                    : 'Student'}
+                </div>
+              </div>
+              <div className="form-group">
                 <label>Student ID</label>
                 <div className="form-input">{selectedTicket.studentId || 'N/A'}</div>
               </div>
@@ -699,7 +741,8 @@ const Adminmanagement = ({ officeType }) => {
               <div>
                 <h3>Transfer Ticket</h3>
                 <p>
-                  Currently <strong>{selectedTicket.number}</strong> in {OFFICE_OPTIONS.find(o => o.id === officeType)?.label}
+                  <span className="modal-ticket-number">{selectedTicket.number}</span>
+                  <span>from {OFFICE_OPTIONS.find(o => o.id === officeType)?.label}</span>
                 </p>
               </div>
               <button type="button" className="modal-x" onClick={closeTransfer} aria-label="Close">×</button>
@@ -718,12 +761,18 @@ const Adminmanagement = ({ officeType }) => {
 
               <label className="modal-field">
                 <span>Reason / purpose</span>
-                <textarea
-                  rows={3}
+                <select
                   value={transferForm.purpose}
                   onChange={updateTransferField('purpose')}
-                  placeholder="e.g. Enrollment: subject approval"
-                />
+                  disabled={!transferForm.office}
+                >
+                  <option value="" disabled>
+                    {transferForm.office ? 'Select a reason / purpose' : 'Select an office first'}
+                  </option>
+                  {(OFFICE_PURPOSES[transferForm.office] || []).map(purpose => (
+                    <option key={purpose} value={purpose}>{purpose}</option>
+                  ))}
+                </select>
               </label>
 
               <div className="modal-row">

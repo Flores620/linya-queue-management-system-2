@@ -9,10 +9,13 @@ const pad = (n) => String(n).padStart(2, '0');
 const monthKeyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 const dayKeyOf = (d) => `${monthKeyOf(d)}-${pad(d.getDate())}`;
 
-const computeStats = (tickets) => {
+const computeStats = (tickets, officeType) => {
+  const statusOf = (ticket) => officeType
+    ? getHistoryStatus(ticket, officeType)
+    : ticket.status;
   const total = tickets.length;
-  const served = tickets.filter((t) => t.status === 'Served').length;
-  const unclaimed = tickets.filter((t) => t.status === 'Expired').length;
+  const served = tickets.filter((t) => statusOf(t) === 'Served').length;
+  const unclaimed = tickets.filter((t) => statusOf(t) === 'Expired').length;
   const transferred = tickets.filter((t) => t.isTransferred).length;
   const rate = total ? Math.round((served / total) * 100) : 0;
 
@@ -30,6 +33,26 @@ const OFFICE_LABELS = {
   cashier: 'Cashier',
   principal: "Principal's Office",
 };
+
+const OFFICE_PREFIXES = {
+  registrar: 'R-',
+  cashier: 'C-',
+  principal: 'P-',
+};
+
+const getTransferSource = (ticket) => {
+  if (ticket.transferredFrom) return ticket.transferredFrom;
+  const originalNumber = ticket.originalNumber || ticket.previousNumber || '';
+  return Object.keys(OFFICE_PREFIXES).find((office) => originalNumber.startsWith(OFFICE_PREFIXES[office]));
+};
+
+const getOfficeTicketNumber = (ticket, officeType) =>
+  ticket.isTransferred && getTransferSource(ticket) === officeType
+    ? ticket.previousNumber || ticket.originalNumber || ticket.number
+    : ticket.number;
+
+const getHistoryStatus = (ticket, officeType) =>
+  ticket.isTransferred && getTransferSource(ticket) === officeType ? 'Served' : ticket.status;
 
 const History = ({ officeType }) => {
   const [tickets, setTickets] = useState([]);
@@ -80,7 +103,7 @@ const History = ({ officeType }) => {
   const months = useMemo(() => {
     const monthMap = {};
     tickets.forEach((t) => {
-      const d = new Date(t.completedAt || t.timestamp);
+        const d = new Date(t.completedAt || t.transferredAt || t.timestamp);
       if (Number.isNaN(d.getTime())) return;
       const mk = monthKeyOf(d);
       const dk = dayKeyOf(d);
@@ -108,16 +131,16 @@ const History = ({ officeType }) => {
       .sort((a, b) => (a.key < b.key ? 1 : -1))
       .map((m) => ({
         ...m,
-        stats: computeStats(m.all),
+        stats: computeStats(m.all, officeType),
         dayList: Object.values(m.days)
           .sort((a, b) => (a.key < b.key ? 1 : -1))
           .map((day) => ({
             ...day,
             tickets: [...day.tickets].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)),
-            stats: computeStats(day.tickets),
+            stats: computeStats(day.tickets, officeType),
           })),
       }));
-  }, [tickets]);
+  }, [tickets, officeType]);
 
   // Open the newest month and day the first time data arrives
   useEffect(() => {
@@ -128,13 +151,15 @@ const History = ({ officeType }) => {
     }
   }, [months, initialized]);
 
-  const overall = useMemo(() => computeStats(tickets), [tickets]);
+  const overall = useMemo(() => computeStats(tickets, officeType), [tickets, officeType]);
 
   const matchesFilters = (t) => {
-    if (statusFilter === 'served' && t.status !== 'Served') return false;
-    if (statusFilter === 'unclaimed' && t.status !== 'Expired') return false;
+    const status = getHistoryStatus(t, officeType);
+    if (statusFilter === 'served' && status !== 'Served') return false;
+    if (statusFilter === 'unclaimed' && status !== 'Expired') return false;
+    if (statusFilter === 'transferred' && !t.isTransferred) return false;
     if (dateFilter) {
-      const completedDate = new Date(t.completedAt || t.timestamp);
+      const completedDate = new Date(t.completedAt || t.transferredAt || t.timestamp);
       if (Number.isNaN(completedDate.getTime()) || dayKeyOf(completedDate) !== dateFilter) return false;
     }
     if (!search.trim()) return true;
@@ -278,6 +303,10 @@ const History = ({ officeType }) => {
           <span className="hx-summary-label">Unclaimed</span>
           <span className="hx-summary-value">{overall.unclaimed}</span>
         </div>
+        <div className="hx-summary-card hx-violet">
+          <span className="hx-summary-label">Transferred</span>
+          <span className="hx-summary-value">{overall.transferred}</span>
+        </div>
         <div className="hx-summary-card hx-blue">
           <span className="hx-summary-label">Completion Rate</span>
           <span className="hx-summary-value">{overall.rate}%</span>
@@ -310,6 +339,7 @@ const History = ({ officeType }) => {
           <option value="all">All statuses</option>
           <option value="served">Served only</option>
           <option value="unclaimed">Unclaimed only</option>
+          <option value="transferred">Transferred only</option>
         </select>
         {isFiltering && (
           <button
@@ -432,28 +462,66 @@ const History = ({ officeType }) => {
                                   <th>Name</th>
                                   <th>Student ID</th>
                                   <th>Purpose</th>
+                                  <th>Transfer</th>
                                   <th>Status</th>
-                                  <th>Completed</th>
+                                  <th>Activity</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {day.visible.map((t) => (
+                                {day.visible.map((t) => {
+                                  const status = getHistoryStatus(t, officeType);
+                                  return (
                                   <tr key={t.id}>
                                     <td>
-                                      <strong>{t.number}</strong>
-                                      {t.isTransferred && <span className="hx-tag hx-tag-blue">TRANSFERRED</span>}
+                                      <strong>{getOfficeTicketNumber(t, officeType)}</strong>
                                     </td>
                                     <td>{t.name}</td>
                                     <td>{t.studentId || 'N/A'}</td>
                                     <td>{t.purpose}</td>
                                     <td>
-                                      <span className={`hx-status ${t.status === 'Served' ? 'served' : 'unclaimed'}`}>
-                                        {t.status === 'Expired' ? 'Unclaimed' : t.status}
+                                      {t.isTransferred ? (
+                                        (() => {
+                                          const source = getTransferSource(t);
+                                          const destination = t.transferredTo || t.office;
+                                          if (source === officeType) {
+                                            return (
+                                              <span className="hx-tag hx-tag-blue">
+                                                TRANSFERRED TO {OFFICE_LABELS[destination] || destination}
+                                              </span>
+                                            );
+                                          }
+                                          if (destination === officeType) {
+                                            return (
+                                              <span className="hx-tag hx-tag-blue">
+                                                TRANSFERRED FROM {OFFICE_LABELS[source] || source}
+                                              </span>
+                                            );
+                                          }
+                                          return (
+                                            <span className="hx-tag hx-tag-blue">
+                                              TRANSFERRED
+                                            </span>
+                                          );
+                                        })()
+                                      ) : (
+                                        <span className="hx-transfer-none">—</span>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <span className={`hx-status ${status === 'Served' ? 'served' : status === 'Expired' ? 'unclaimed' : 'active'}`}>
+                                        {status === 'Expired'
+                                          ? 'Unclaimed'
+                                          : status === 'Waiting'
+                                            ? 'Waiting'
+                                            : status === 'Serving'
+                                              ? 'Serving'
+                                              : status}
                                       </span>
                                     </td>
-                                    <td>{new Date(t.completedAt || t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                                    <td>{new Date(t.completedAt || t.transferredAt || t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
                                   </tr>
-                                ))}
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>

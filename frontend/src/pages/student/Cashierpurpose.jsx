@@ -40,8 +40,22 @@ function CashierPurpose() {
         <form onSubmit={handleSubmit}>
           <fieldset className="client-type-picker">
             <legend>Client type</legend>
-            <label><input type="radio" name="clientType" value="student" checked={clientType === "student"} onChange={() => setClientType("student")} /> Student</label>
-            <label><input type="radio" name="clientType" value="visitor" checked={clientType === "visitor"} onChange={() => setClientType("visitor")} /> Visitor</label>
+            <label className="client-type-option">
+              <input type="radio" name="clientType" value="student" checked={clientType === "student"} onChange={() => setClientType("student")} />
+              <span className="client-type-icon" aria-hidden="true">S</span>
+              <span className="client-type-copy">
+                <strong>Student</strong>
+              </span>
+              <span className="client-type-check" aria-hidden="true">✓</span>
+            </label>
+            <label className="client-type-option">
+              <input type="radio" name="clientType" value="visitor" checked={clientType === "visitor"} onChange={() => setClientType("visitor")} />
+              <span className="client-type-icon" aria-hidden="true">V</span>
+              <span className="client-type-copy">
+                <strong>Visitor</strong>
+              </span>
+              <span className="client-type-check" aria-hidden="true">✓</span>
+            </label>
           </fieldset>
 
           <div>
