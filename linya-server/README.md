@@ -10,6 +10,8 @@ The Blueprint builds the frontend and server, starts the server, and uses `/api/
 
 The free Render filesystem is ephemeral. Firestore is required to recover queue state after a service restart; for durable local-file storage, attach a persistent disk mounted at `/var/data` and set `DATA_DIR` to `/var/data` in the service environment. Render also cannot serve campus devices when their internet connection is down or directly access a printer attached to the school PC. Use the school-PC LAN setup below if offline campus service and local printing are required.
 
+The kiosk sends print jobs automatically to the server at `VITE_PRINT_SERVER_URL` (or to the current origin when unset). For a Render-hosted website to print at the school, set this Vite build variable to the school PC's browser-reachable HTTPS URL, such as `https://<school-PC-LAN-IP>:5000`. The school PC must be running this server with a configured printer, and its HTTPS certificate must be trusted by the kiosk browser. If `CORS_ORIGIN` is restricted, include the deployed website's origin. Without a local printer server, Render cannot print to the school printer.
+
 ## Initial setup on the school PC
 
 1. Install a supported Node.js LTS release.

@@ -11,6 +11,7 @@ import RegistrarPurpose from './pages/student/Registrarpurpose.jsx';
 import CashierPurpose from './pages/student/Cashierpurpose.jsx';
 import PrincipalPurpose from './pages/student/Principalpurpose.jsx';
 import Ticketscreen from './pages/student/Ticketscreen.jsx';
+import KioskTicketScreen from './pages/student/Kioskticketscreen.jsx';
 import Home from './pages/Home.jsx';
 import Display from './pages/Display.jsx';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
@@ -56,7 +57,7 @@ const RootRoute = () => {
 
 function App() {
   const location = useLocation();
-  const standaloneView = ['/kiosk', '/Selectoffice', '/Getticket', '/RegistrarPurpose', '/CashierPurpose', '/PrincipalPurpose', '/ticketscreen', '/display'].includes(location.pathname);
+  const standaloneView = ['/kiosk', '/Selectoffice', '/Getticket', '/RegistrarPurpose', '/CashierPurpose', '/PrincipalPurpose', '/ticketscreen', '/kioskticketscreen', '/display'].includes(location.pathname);
 
   return (
     <AuthProvider>
@@ -66,6 +67,7 @@ function App() {
           <Route path="/" element={<RootRoute />} />
           <Route path="/Home" element={<ProtectedHomeRoute><Home /></ProtectedHomeRoute>} />
           <Route path="/ticketscreen" element={<Ticketscreen />} />
+          <Route path="/kioskticketscreen" element={<KioskTicketScreen />} />
           <Route path="/kiosk" element={<Selectoffice />} />
           <Route path="/display" element={<Display />} />
           <Route path="/Selectoffice" element={<Selectoffice />} />

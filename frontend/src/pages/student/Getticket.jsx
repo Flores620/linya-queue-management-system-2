@@ -116,23 +116,9 @@ function Getticket() {
   const handleProceed = () => {
     if (isMobile) {
       navigate('/ticketscreen', { state: { ticket } });
-    } else {
-      const printKey = `linya-printed-${ticket.id}`;
-      if (!localStorage.getItem(printKey)) {
-        fetch(`${LOCAL_SERVER_URL}/api/print-ticket`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ticket }),
-        })
-          .then(async (res) => {
-            const result = await res.json();
-            if (res.ok) localStorage.setItem(printKey, 'true');
-            else setError(result.error || 'Unable to print this ticket.');
-          })
-          .catch(() => setError('The print service is unreachable. The ticket is still valid.'));
-      }
-      navigate('/kiosk');
+      return;
     }
+    navigate('/kioskticketscreen', { state: { ticket } });
   };
 
   if (!name || !purpose || !office) {

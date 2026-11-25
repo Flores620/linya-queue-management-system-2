@@ -81,9 +81,12 @@ function PrincipalPurpose() {
             <label>Student ID:</label>
             <input
               type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               placeholder="Enter Student ID"
               value={studentId}
-              onChange={(e) => setStudentId(e.target.value)}
+              onChange={(e) => setStudentId(e.target.value.replace(/\D/g, ""))}
+              required={clientType === "student"}
             />
           </div>}
 

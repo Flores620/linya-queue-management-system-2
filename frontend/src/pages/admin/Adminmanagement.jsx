@@ -222,7 +222,9 @@ const Adminmanagement = ({ officeType }) => {
   };
 
   const updateTransferField = (field) => (e) => {
-    const value = e.target.value;
+    const value = field === 'studentId'
+      ? e.target.value.replace(/\D/g, '')
+      : e.target.value;
     setTransferForm(prev => ({
       ...prev,
       [field]: value,
@@ -782,7 +784,14 @@ const Adminmanagement = ({ officeType }) => {
                 </label>
                 <label className="modal-field">
                   <span>Student ID</span>
-                  <input type="text" value={transferForm.studentId} onChange={updateTransferField('studentId')} placeholder="N/A" />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={transferForm.studentId}
+                    onChange={updateTransferField('studentId')}
+                    placeholder="N/A"
+                  />
                 </label>
               </div>
 

@@ -46,17 +46,6 @@ function RegistrarPurpose() {
         <PhoneLocationPrompt />
 
         <form onSubmit={handleSubmit}>
-          <div>
-            <label>Name:</label>
-            <input
-              type="text"
-              placeholder="Enter name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </div>
-
           <fieldset className="client-type-picker">
             <legend>Client type</legend>
             <label className="client-type-option">
@@ -77,13 +66,26 @@ function RegistrarPurpose() {
             </label>
           </fieldset>
 
+          <div>
+            <label>Name:</label>
+            <input
+              type="text"
+              placeholder="Enter name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+
           {clientType === "student" && <div>
             <label>Student ID:</label>
             <input
               type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               placeholder="Enter Student ID"
               value={studentId}
-              onChange={(e) => setStudentId(e.target.value)}
+              onChange={(e) => setStudentId(e.target.value.replace(/\D/g, ""))}
               required
             />
           </div>}
@@ -105,7 +107,6 @@ function RegistrarPurpose() {
               <option value="ID Validation / Verification">ID Validation / Verification</option>
             </select>
           </div>
-
 
           <button type="submit">Submit</button>
         </form>

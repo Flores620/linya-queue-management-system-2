@@ -1,0 +1,40 @@
+.kiosk-ticket-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 16px;
+  background: #ffffff;
+}
+
+.kiosk-ticket-screen .receipt {
+  width: min(80mm, 100%);
+}
+
+.kiosk-ticket-print-error {
+  margin: 12px 0 0;
+  color: #b91c1c;
+  font-weight: 700;
+  text-align: center;
+}
+
+.kiosk-ticket-countdown {
+  margin: 16px 0 0;
+  color: #475569;
+  font-weight: 600;
+}
+
+.kiosk-ticket-done {
+  min-width: 120px;
+  margin-top: 12px;
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 8px;
+  background: #001960;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}

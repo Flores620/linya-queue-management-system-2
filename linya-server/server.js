@@ -654,6 +654,9 @@ app.post('/api/issue-ticket', (req, res) => {
   if (normalizedType === 'student' && !normalizedId) {
     return res.status(400).json({ error: 'Student ID is required.' });
   }
+  if (normalizedType === 'student' && !/^\d+$/.test(normalizedId)) {
+    return res.status(400).json({ error: 'Student ID must contain numbers only.' });
+  }
 
   if (normalizedType === 'student') {
     const duplicate = state.tickets.find((t) =>
@@ -817,6 +820,10 @@ io.on('connection', (socket) => {
     const cleanPurpose = String(purpose || '').trim();
     const cleanName = String(name || '').trim();
     if (!cleanPurpose || !cleanName) return reply({ ok: false, error: 'Name and purpose are required.' });
+    const cleanStudentId = normalizeStudentId(studentId);
+    if (ticket.clientType === 'student' && !/^\d+$/.test(cleanStudentId)) {
+      return reply({ ok: false, error: 'Student ID must contain numbers only.' });
+    }
 
     const dateKey = toDateKey();
     state.counters[target] ||= {};
@@ -829,7 +836,7 @@ io.on('connection', (socket) => {
     ticket.office = target;
     ticket.purpose = cleanPurpose;
     ticket.name = cleanName;
-    ticket.studentId = ticket.clientType === 'student' ? normalizeStudentId(studentId) : 'N/A';
+    ticket.studentId = ticket.clientType === 'student' ? cleanStudentId : 'N/A';
     ticket.status = 'Waiting';
     ticket.isTransferred = true;
     ticket.transferredFrom = source;
